@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+    <title>Journey Planner with Dynamic Time Location</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+        body {
+            background-image: url('/mnt/data/download.jpeg');
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            background-position: center;
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            margin-top: 20px;
+            color: #007BFF;
+        }
+
+        #map {
+            height: 60vh;
+            width: 100%;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 20px;
+        }
+
+        form {
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            max-width: 600px;
+            width: 100%;
+            box-sizing: border-box;
+            margin: 20px auto;
+        }
+
+        label {
+            font-weight: 500;
+            margin-top: 10px;
+        }
+
+        input, button {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-top: 5px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #007BFF;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .form-group {
+            width: 100%;
+        }
+
+        #results {
+            display: flex;
+            justify-content: space-between;
+            max-width: 1200px;
+            width: 100%;
+            margin: 20px auto;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .result-category {
+            width: 48%;
+        }
+
+        .result-item {
+            margin-bottom: 10px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 10px;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-title {
+            font-weight: 700;
+            color: #007BFF;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Journey Planner</h1>
+        <form id="locationForm">
+            <div class="form-group">
+                <label for="origin">Journey Start Location:</label>
+                <input type="text" id="origin" name="origin" required>
+            </div>
+            <div class="form-group">
+                <label for="destination">Destination:</label>
+                <input type="text" id="destination" name="destination" required>
+            </div>
+            <div class="form-group">
+                <label for="foodBreakTime">Food Break After (hours):</label>
+                <input type="number" id="foodBreakTime" name="foodBreakTime" min="0.1" step="0.1" required>
+            </div>
+            <div class="form-group">
+                <label for="hotelStayTime">Hotel Stay After (hours):</label>
+                <input type="number" id="hotelStayTime" name="hotelStayTime" min="0.1" step="0.1" required>
+            </div>
+            <div class="form-group">
+                <label for="startDate">Start Date:</label>
+                <input type="date" id="startDate" name="startDate" required>
+            </div>
+            <div class="form-group">
+                <label for="startTime">Start Time:</label>
+                <input type="time" id="startTime" name="startTime" required>
+            </div>
+            <div class="form-group">
+                <label for="radius">Search Radius for Restaurants and Hotels (meters):</label>
+                <input type="number" id="radius" name="radius" min="100" max="50000" step="100" value="5000">
+            </div>
+            <button type="submit">Find Restaurants and Hotels</button>
+        </form>
+        <div id="map"></div>
+        <div id="results">
+            <div class="result-category" id="restaurant-results">
+                <h2>Restaurants</h2>
+            </div>
+            <div class="result-category" id="hotel-results">
+                <h2>Hotels</h2>
+            </div>
+        </div>
+    </div>
+    <script>
+        let map;
+        let directionsService;
+        let directionsRenderer;
+        let placesService;
+
+        function initMap() {
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer();
+            const center = { lat: 19.07596, lng: 72.87764 };
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 8,
+                center: center,
+            });
+            directionsRenderer.setMap(map);
+
+            // Initialize the Places service
+            placesService = new google.maps.places.PlacesService(map);
+        }
+
+        document.getElementById('locationForm').addEventListener('submit', function(event) {
+            event.preventDefault();
+            calculateAndDisplayRoute();
+        });
+
+        function calculateAndDisplayRoute() {
+            const origin = document.getElementById('origin').value;
+            const destination = document.getElementById('destination').value;
+            const foodBreakTime = parseFloat(document.getElementById('foodBreakTime').value) * 3600; // Convert hours to seconds
+            const hotelStayTime = parseFloat(document.getElementById('hotelStayTime').value) * 3600; // Convert hours to seconds
+            const startDate = document.getElementById('startDate').value;
+            const startTime = document.getElementById('startTime').value;
+            const radius = document.getElementById('radius').value || 5000;
+            const startDateTime = new Date(`${startDate}T${startTime}:00`);
+            const request = {
+                origin: origin,
+                destination: destination,
+                travelMode: 'DRIVING',
+                drivingOptions: {
+                    departureTime: startDateTime,
+                    trafficModel: 'bestguess'
+                }
+            };
+            directionsService.route(request, function(result, status) {
+                if (status === 'OK') {
+                    directionsRenderer.setDirections(result);
+                    findLocationAfterTime(result, foodBreakTime, 'Food Break After ', 'restaurant', radius);
+                    findLocationAfterTime(result, hotelStayTime, 'Hotel Stay After ', 'hotel', radius);
+                    showTotalTravelTime(result);
+                } else {
+                    window.alert('Directions request failed due to ' + status);
+                }
+            });
+        }
+
+        function findLocationAfterTime(result, travelTime, label, type, radius) {
+            const route = result.routes[0];
+            const leg = route.legs[0];
+            const polyline = new google.maps.Polyline({
+                path: google.maps.geometry.encoding.decodePath(route.overview_polyline),
+            });
+
+            let totalTime = 0;
+            let targetLatLng = null;
+            for (let i = 0; i < leg.steps.length; i++) {
+                const step = leg.steps[i];
+                totalTime += step.duration.value;
+                if (totalTime > travelTime) {
+                    targetLatLng = step.end_location;
+                    break;
+                }
+            }
+
+            if (targetLatLng) {
+                searchNearbyPlaces(targetLatLng, type, radius);
+                createMarker({
+                    geometry: { location: targetLatLng },
+                    name: label + (travelTime / 3600) + ' Hours',
+                    vicinity: '',
+                    rating: '',
+                }, type);
+
+                map.panTo(targetLatLng);
+
+                const geocoder = new google.maps.Geocoder();
+                geocoder.geocode({ location: targetLatLng }, function(results, status) {
+                    if (status === 'OK') {
+                        if (results[0]) {
+                            window.alert(label + (travelTime / 3600) + ' hours: ' + results[0].formatted_address);
+                        } else {
+                            window.alert('No results found');
+                        }
+                    } else {
+                        window.alert('Geocoder failed due to: ' + status);
+                    }
+                });
+            } else {
+                window.alert('Could not determine location after ' + (travelTime / 3600) + ' hours.');
+            }
+        }
+
+        function searchNearbyPlaces(location, type, radius) {
+            const request = {
+                location: location,
+                radius: radius,
+                type: [type]
+            };
+
+            placesService.nearbySearch(request, function(results, status) {
+                if (status === google.maps.places.PlacesServiceStatus.OK) {
+                    const allResults = results.map(result => ({ ...result, type: type }));
+                    allResults.forEach(result => createMarker(result, type));
+                    displayResults(allResults, type);
+                } else {
+                    window.alert(`No ${type}s found within the given radius`);
+                }
+            });
+        }
+
+        function showTotalTravelTime(result) {
+            const route = result.routes[0];
+            const leg = route.legs[0];
+            const totalTravelTime = leg.duration_in_traffic ? leg.duration_in_traffic.text : leg.duration.text;
+
+            window.alert('Total travel time to destination: ' + totalTravelTime);
+        }
+
+        function displayResults(results, type) {
+            const resultsContainer = document.getElementById(type === 'restaurant' ? 'restaurant-results' : 'hotel-results');
+            resultsContainer.innerHTML = `<h2>${type === 'restaurant' ? 'Restaurants' : 'Hotels'}</h2>`;
+
+            results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+
+            results.forEach(place => {
+                const resultItem = document.createElement('div');
+                resultItem.className = 'result-item';
+
+                const resultTitle = document.createElement('div');
+                resultTitle.className = 'result-title';
+                resultTitle.innerHTML = `<a href="https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat()},${place.geometry.location.lng()}" target="_blank">${place.name}</a>`;
+
+                const resultDetails = document.createElement('div');
+                resultDetails.innerHTML = `
+                    <strong>Type:</strong> ${place.type.charAt(0).toUpperCase() + place.type.slice(1)}<br>
+                    <strong>Rating:</strong> ${place.rating || 'N/A'}<br>
+                    <strong>Address:</strong> ${place.vicinity}
+                `;
+
+                resultItem.appendChild(resultTitle);
+                resultItem.appendChild(resultDetails);
+
+                resultsContainer.appendChild(resultItem);
+            });
+        }
+
+        function createMarker(place, type) {
+            const markerOptions = {
+                position: place.geometry.location,
+                map: map,
+                title: place.name
+            };
+
+            // Differentiate marker colors for restaurants and hotels
+            if (type === 'hotel') {
+                markerOptions.icon = {
+                    url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png"
+                };
+            } else if (type === 'restaurant') {
+                markerOptions.icon = {
+                    url: "http://maps.google.com/mapfiles/ms/icons/red-dot.png"
+                };
+            }
+
+            const marker = new google.maps.Marker(markerOptions);
+
+            const infowindow = new google.maps.InfoWindow({
+                content: `<div><strong>${place.name}</strong><br>
+                          Rating: ${place.rating || 'N/A'}<br>
+                          Address: ${place.vicinity}<br>
+                          <a href="https://www.google.com/maps/search/?api=1&query=${place.geometry.location.lat()},${place.geometry.location.lng()}" target="_blank">View on Google Maps</a></div>`
+            });
+
+            marker.addListener('click', function() {
+                infowindow.open(map, marker);
+            });
+        }
+    </script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB1DfXYFpu_ofvOqh9TuBHd1eaSFDS882Y&libraries=places,geometry&callback=initMap">
+    </script>
+</body>
+</html>
